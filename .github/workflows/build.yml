@@ -584,10 +584,12 @@ jobs:
 
           PROXY="${{ inputs.proxy }}"; PROXY="${PROXY:-passwall}"
           {
+            echo "PonWrt for FiberHome HG5585F-CU（Airoha AN7581，联通 XG-PON 非对称）"
+            echo ""
             echo "基于[Bernardxu123/ponwrt-hg5585f](https://github.com/Bernardxu123/ponwrt-hg5585f)构建，在此感谢"
+            echo ""
             echo "预配置：\`lan=192.168.2.1/24\`，lan 网络不包含\`lan1\`，包含\`lan2..4\`，其他网络预配置可Luci查看"
             # echo "PonWrt for FiberHome HG5585F（Airoha AN7581，联通 10G-EPON 非对称）"
-            echo "PonWrt for FiberHome HG5585F-CU（Airoha AN7581，联通 XG-PON 非对称）"
             echo ""
             echo "- 源码 commit：\`${{ env.COMMIT }}\`"
             echo "- 分流内核：**${PROXY}**"
@@ -607,7 +609,7 @@ jobs:
             echo ""
             # echo "- PON：\`epon-10g-1g\` + OAM \`ctc\` + \`ge_ports=4\`"
             # echo "- 形态：PPPoE 主路由（\`wan=pon0.995/pppoe/mtu1492\`，\`wan6=dhcpv6\`，\`br-lan=lan1..4\`，LAN \`192.168.31.1/24\`）"
-            echo "- 形态：PPPoE 主路由（\`wan=pon0.21/pppoe/mtu1492\`，\`wan=lan1/static\`，\`wan6=dhcpv6\`，\`br-lan=lan2..4\`，LAN \`192.168.2.1/24\`）"
+            echo "- 形态：PPPoE 主路由（\`wan=pon0.21/pppoe/mtu1492\`，\`wan=lan1/static\`，\`wan6=dhcpv6\`，\`br-lan=lan2..4\`， \`lan=192.168.2.1/24\`）"
             echo "- \`pon-watchdog\` 默认启用（兜底上游 Issue #42 的 10G-EPON 冷启动 MPCP 自循环）"
             echo "- WiFi 默认关闭；UPnP / br_netfilter / EN7572 / BTF 均不启用"
             echo ""
