@@ -76,8 +76,12 @@ recover() {
 	log "recover: 开始（只拆 WAN，保留 LAN/管理面）"
 
 	ifdown wan >/dev/null 2>&1 || true
-	ip link set pon0.995 down 2>/dev/null
-	ip link del pon0.995 2>/dev/null
+	# ip link set pon0.995 down 2>/dev/null
+	# ip link del pon0.995 2>/dev/null
+    for i in $(ip -o link show | awk -F': ' '{print $2}' | grep '^pon0\.'); do
+    	ip link set "$i" down 2>/dev/null
+    	ip link del "$i" 2>/dev/null
+	done
 	ip link set pon0 down 2>/dev/null
 	/etc/init.d/airoha-pond stop >/dev/null 2>&1
 
