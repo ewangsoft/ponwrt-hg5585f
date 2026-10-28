@@ -18,7 +18,7 @@
 
 config xpon 'line0'
 	option device 'pon0'
-	option mode 'epon-10g-1g'
+	# option mode 'epon-10g-1g'
 	# Accepts 16 raw hex digits or VEND followed by 8 hex digits.
 	option serial_number ''
 	# Accepts text:VALUE or hex: followed by 72 hex digits.
@@ -35,7 +35,7 @@ config omci 'line0_omci'
 	option hardware_version ''
 	option software_version ''
 	option operator_id ''
-	option loid ''
+	option loid '1165127274'
 	option loid_password ''
 
 config oam 'line0_oam'
