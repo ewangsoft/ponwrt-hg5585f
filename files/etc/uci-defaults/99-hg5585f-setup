@@ -166,7 +166,7 @@ EOF
 # ---------------------------------------------------------------------------
 uci -q batch <<EOF
 set network.iptv_vlan${VLAN_IPTV_m}='interface'
-set network.iptv_vlan${VLAN_IPTV_u}.device='pon0.${VLAN_IPTV_u}'
+set network.iptv_vlan${VLAN_IPTV_m}.device='pon0.${VLAN_IPTV_m}'
 EOF
 
 # ---------------------------------------------------------------------------
@@ -189,8 +189,9 @@ EOF
 # ---------------------------------------------------------------------------
 # wan2添加到wan防火墙区域
 # ---------------------------------------------------------------------------
-uci -q add_list firewall.wan.network='wan2'
-uci -q add_list firewall.wan.network='wan62'
+WAN_index=$(uci show firewall | grep "name='wan'" | sed -n 's/firewall\.@zone\[\([0-9]*\)\]\.name='\''wan'\''/\1/p' | head -n1)
+uci -q add_list firewall.@zone[${WAN_index}].network='wan2'
+uci -q add_list firewall.@zone[${WAN_index}].network='wan62'
 
 # ---------------------------------------------------------------------------
 # 5. DHCP / RA：现在是主路由，必须开
@@ -345,11 +346,13 @@ add_list system.ntp.server='ntp.tencent.com'
 add_list system.ntp.server='cn.pool.ntp.org'
 EOF
 
+uci set luci.main.mediaurlbase='/luci-static/bootstrap'
+
 uci -q commit network
 uci -q commit dhcp
 uci -q commit firewall
 uci -q commit system
-
+uci -q commit luci
 # ---------------------------------------------------------------------------
 # 9. 自检
 # ---------------------------------------------------------------------------
