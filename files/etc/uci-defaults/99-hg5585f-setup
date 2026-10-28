@@ -24,13 +24,17 @@ log() {
 	logger -t hg5585f-setup "$*"
 }
 
-VLAN_INTERNET=995
-LAN_ADDR=192.168.31.1
+VLAN_INTERNET=21
+VLAN_IPTV_u=23
+VLAN_IPTV_m=99
+LAN_ADDR=192.168.2.1
 LAN_NETMASK=255.255.255.0
+IPTV_ADDR=10.23.246.250
+IPTV_NETMASK=255.255.248.0
 
 # ---------------------------------------------------------------------------
 # 1. 重建 network.device
-#    br-lan 只含 lan1..4；pon0.995 只作为 WAN 的 802.1q 设备存在。
+#    br-lan 只含 lan2..4；pon0.21 只作为 WAN 的 802.1q 设备存在；pon0.23 只作为 iptv_vlan23 的 802.1q 设备存在；pon0.99 只作为 iptv_vlan99 的 802.1q 设备存在。
 # ---------------------------------------------------------------------------
 n=$(uci -q show network 2>/dev/null | grep -c '=device$')
 while [ "$n" -gt 0 ]; do
@@ -38,23 +42,32 @@ while [ "$n" -gt 0 ]; do
 	n=$((n - 1))
 done
 
-uci -q delete network.br_lan
-uci -q delete network.pon0_995
-
 uci -q batch <<EOF
 set network.br_lan='device'
 set network.br_lan.name='br-lan'
 set network.br_lan.type='bridge'
-add_list network.br_lan.ports='lan1'
+# add_list network.br_lan.ports='lan1'
 add_list network.br_lan.ports='lan2'
 add_list network.br_lan.ports='lan3'
 add_list network.br_lan.ports='lan4'
 
-set network.pon0_995='device'
-set network.pon0_995.name='pon0.995'
-set network.pon0_995.type='8021q'
-set network.pon0_995.ifname='pon0'
-set network.pon0_995.vid='${VLAN_INTERNET}'
+set network.pon0_${VLAN_INTERNET}='device'
+set network.pon0_${VLAN_INTERNET}.name='pon0.${VLAN_INTERNET}'
+set network.pon0_${VLAN_INTERNET}.type='8021q'
+set network.pon0_${VLAN_INTERNET}.ifname='pon0'
+set network.pon0_${VLAN_INTERNET}.vid='${VLAN_INTERNET}'
+
+set network.pon0_${VLAN_IPTV_u}='device'
+set network.pon0_${VLAN_IPTV_u}.name='pon0.${VLAN_IPTV_u}'
+set network.pon0_${VLAN_IPTV_u}.type='8021q'
+set network.pon0_${VLAN_IPTV_u}.ifname='pon0'
+set network.pon0_${VLAN_IPTV_u}.vid='${VLAN_IPTV_u}'
+
+set network.pon0_${VLAN_IPTV_m}='device'
+set network.pon0_${VLAN_IPTV_m}.name='pon0.${VLAN_IPTV_m}'
+set network.pon0_${VLAN_IPTV_m}.type='8021q'
+set network.pon0_${VLAN_IPTV_m}.ifname='pon0'
+set network.pon0_${VLAN_IPTV_m}.vid='${VLAN_IPTV_m}'
 EOF
 
 # ---------------------------------------------------------------------------
@@ -80,7 +93,7 @@ delete network.lan.ip6prefix
 EOF
 
 # ---------------------------------------------------------------------------
-# 3. wan：联通 PPPoE over VLAN 995
+# 3. wan：联通 PPPoE over VLAN 21
 #    账号密码刻意留空，刷完填：
 #      uci set network.wan.username='...'
 #      uci set network.wan.password='...'
@@ -94,7 +107,7 @@ EOF
 # ---------------------------------------------------------------------------
 uci -q batch <<EOF
 set network.wan='interface'
-set network.wan.device='pon0.995'
+set network.wan.device='pon0.${VLAN_INTERNET}'
 set network.wan.proto='pppoe'
 set network.wan.ipv6='1'
 set network.wan.auto='1'
@@ -121,6 +134,63 @@ set network.wan6.reqprefix='auto'
 set network.wan6.peerdns='1'
 set network.wan6.auto='1'
 EOF
+
+# ---------------------------------------------------------------------------
+# 2. wan2：DHCP + 第二出口
+# ---------------------------------------------------------------------------
+uci -q batch <<EOF
+set network.wan2='interface'
+set network.wan2.device='lan1'
+set network.wan2.proto='dhcp'
+
+set network.wan62='interface'
+set network.wan62.device='lan1'
+set network.wan62.proto='dhcpv6'
+set network.wan62.norelease='1'
+EOF
+
+# ---------------------------------------------------------------------------
+# IPTV单播接口配置
+# ---------------------------------------------------------------------------
+uci -q batch <<EOF
+set network.iptv_vlan${VLAN_IPTV_u}='interface'
+set network.iptv_vlan${VLAN_IPTV_u}.device='pon0.${VLAN_IPTV_u}'
+set network.iptv_vlan${VLAN_IPTV_u}.proto='static'
+set network.iptv_vlan${VLAN_IPTV_u}.device='pon0.${VLAN_IPTV_u}'
+set network.iptv_vlan${VLAN_IPTV_u}.ipaddr='${IPTV_ADDR}'
+set network.iptv_vlan${VLAN_IPTV_u}.netmask='${IPTV_NETMASK}'
+EOF
+
+# ---------------------------------------------------------------------------
+# IPTV组播接口配置
+# ---------------------------------------------------------------------------
+uci -q batch <<EOF
+set network.iptv_vlan${VLAN_IPTV_m}='interface'
+set network.iptv_vlan${VLAN_IPTV_u}.device='pon0.${VLAN_IPTV_u}'
+EOF
+
+# ---------------------------------------------------------------------------
+# 配置IPTV防火墙区域
+# ---------------------------------------------------------------------------
+uci -q batch <<EOF
+set firewall.iptv='zone'
+set firewall.iptv.name='iptv'
+set firewall.iptv.input='DROP'
+set firewall.iptv.output='ACCEPT'
+set firewall.iptv.forward='DROP'
+set firewall.iptv.masq='1'
+add_list firewall.iptv.network='iptv_vlan${VLAN_IPTV_u}'
+add_list firewall.iptv.network='iptv_vlan${VLAN_IPTV_m}'
+set firewall.iptv_fwd='forwarding'
+set firewall.iptv_fwd.src='lan'
+set firewall.iptv_fwd.dest='iptv'
+EOF
+
+# ---------------------------------------------------------------------------
+# wan2添加到wan防火墙区域
+# ---------------------------------------------------------------------------
+uci -q add_list firewall.wan.network='wan2'
+uci -q add_list firewall.wan.network='wan62'
 
 # ---------------------------------------------------------------------------
 # 5. DHCP / RA：现在是主路由，必须开
@@ -283,21 +353,21 @@ uci -q commit system
 # ---------------------------------------------------------------------------
 # 9. 自检
 # ---------------------------------------------------------------------------
-if [ "$(uci -q get network.wan.device)" = "pon0.995" ] &&
+if [ "$(uci -q get network.wan.device)" = "pon0.${VLAN_INTERNET}" ] &&
    [ "$(uci -q get network.wan.proto)" = "pppoe" ]; then
-	log "OK: wan = pon0.995 / pppoe / mtu $(uci -q get network.wan.mtu)"
+	log "OK: wan = pon0.${VLAN_INTERNET} / pppoe / mtu $(uci -q get network.wan.mtu)"
 else
-	log "ERROR: wan 没有配置成 pon0.995/pppoe"
+	log "ERROR: wan 没有配置成 pon0.${VLAN_INTERNET}/pppoe"
 fi
 
-if uci -q get network.br_lan.ports | grep -qw 'pon0.995'; then
-	log "ERROR: br-lan 里仍含 pon0.995，桥接会再次把 LAN 放进运营商二层"
+if uci -q get network.br_lan.ports | grep -qw 'pon0.${VLAN_INTERNET}'; then
+	log "ERROR: br-lan 里仍含 pon0.${VLAN_INTERNET}，桥接会再次把 LAN 放进运营商二层"
 else
 	log "OK: br-lan 成员 = $(uci -q get network.br_lan.ports | tr '\n' ' ')"
 fi
 
 if [ "$(uci -q get dhcp.lan.ignore)" = "0" ]; then
-	log "OK: lan DHCP/RA 已开启（192.168.31.0/24）"
+	log "OK: lan DHCP/RA 已开启（192.168.2.0/24）"
 else
 	log "ERROR: dhcp.lan.ignore 不是 0，下游拿不到地址"
 fi
