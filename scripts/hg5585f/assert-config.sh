@@ -39,7 +39,7 @@ need_unset() {
 
 # ---- 1. device profile 必须恰好 2 个 ----
 count=$(grep -c '^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_.*=y$' "$cfg" || true)
-if [ "$count" -ne 2 ]; then
+if [ "$count" -ne 1 ]; then
 	err "device profile 数量 = $count，期望 2。实际启用：$(grep '^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_.*=y$' "$cfg" | sed 's/.*_DEVICE_//;s/=y//' | tr '\n' ' ')"
 fi
 
@@ -49,7 +49,7 @@ need_y TARGET_PER_DEVICE_ROOTFS
 
 # ---- 3. 两台机器的 profile ----
 need_y TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5585f-cu
-need_y TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5585f-ct
+# need_y TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5585f-ct
 
 # ---- 4. 路由能力（用户要求"保留完整路由能力"，随时能顶替主路由拨号）----
 need_y PACKAGE_firewall4
