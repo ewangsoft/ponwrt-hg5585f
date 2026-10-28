@@ -1,7 +1,7 @@
-name: build-hg5585f
+name: build-hg5585f-cu
 
-# 只编 FiberHome HG5585F 的 CT + CU 两个 profile（上游默认 12 个）。
-# 产物：fiberhome_hg5585f-{cu,ct} 的 sysupgrade.itb + recovery.itb。
+# 只编 FiberHome HG5585F 的 CU 一个 profile（上游默认 12 个）。
+# 产物：fiberhome_hg5585f-cu 的 sysupgrade.itb + recovery.itb。
 #
 # 触发方式：
 #   * 手动 workflow_dispatch（推荐：先看 master 上的改动再决定编不编）
@@ -57,7 +57,7 @@ env:
 
 jobs:
   build:
-    name: an7581 / HG5585F CT+CU
+    name: an7581 / HG5585F CU
     runs-on: ubuntu-24.04
     timeout-minutes: 350
 
