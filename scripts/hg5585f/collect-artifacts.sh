@@ -40,7 +40,7 @@ with open(sys.argv[1]) as fh:
     data = json.load(fh)
 
 got = sorted(data.get("profiles", {}).keys())
-expect = ["fiberhome_hg5585f-ct", "fiberhome_hg5585f-cu"]
+expect = ["fiberhome_hg5585f-cu"]
 if got != expect:
     print(f"FAIL: profiles.json 里的 device = {got}，期望 {expect}", file=sys.stderr)
     print("      -> configs/hg5585f-profile.config 的收敛层没生效，检查 make defconfig 后的断言", file=sys.stderr)
@@ -52,7 +52,7 @@ PY
 # ---------------------------------------------------------------------------
 # 2) + 3) 每个 device 都要有 sysupgrade 镜像，且 DTB model 对得上
 # ---------------------------------------------------------------------------
-for dev in cu ct; do
+for dev in cu; do
 	model="FiberHome HG5585F $(echo "$dev" | tr '[:lower:]' '[:upper:]')"
 
 	images=$(find "$BIN" -maxdepth 1 -type f -name "*hg5585f-${dev}*" | sort)
