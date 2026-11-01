@@ -14,7 +14,7 @@ immortalwrt/immortalwrt            ← 底座
 pbs05/ponwrt                       ← PON/AN7581 内核补丁 + 8 款整机 + PON feeds
         │  本仓库 = fork + 纯增量文件
         ▼
-Bernardxu123/ponwrt-hg5585f
+Bernardxu123/immortalwrt-hg5585f
 ```
 
 **为什么不能直接编 immortalwrt**：immortalwrt 上游的 `target/linux/airoha` 里没有 FiberHome，
@@ -25,12 +25,29 @@ Bernardxu123/ponwrt-hg5585f
 ```
 configs/hg5585f-profile.config        12 个 device → 2 个
 configs/hg5585f-build.config          ccache / 能力锚点 / 去掉 UPnP / zram / PON 栈
+configs/hg5585f-proxy-honk.config     honk beta3 + BTF + doona 面板
 files/                                首启注入 + 看门狗 + 绑核/温度服务 + sysctl 调优 + 静态 config + banner
                                       （QWRT 逆向借鉴清单见《QWRT-分析/优化借鉴与落地.md》）
 scripts/hg5585f/                      配置生成 / 断言 / 产物校验 / 本地干跑
+package/honk/                         honk-core 预编译包 + procd init + UCI + 默认配置
+package/vmlinux-btf-builtin/           内核自带 BTF 的 +vmlinux-btf 虚依赖
+package/luci-app-honk/ + luci-lib-daeuniverse/  LuCI 状态/配置编辑页
+target/linux/generic/{backport,pending}-6.18/  ImmortalWrt 2026-10-25 的 flowtable/VLAN/DSA 修复
 .github/workflows/build.yml           只编 an7581 + HG5585F 两个 profile
 README-HG5585F.md                     本文件
 ```
+
+**新库基线（2026-10-30）**：本仓库由 `ponwrt-hg5585f` 更名为 `immortalwrt-hg5585f`，
+仍然是 `pbs05/ponwrt` 的 fork（ImmortalWrt master + AN7581/PON 适配）。
+已选入的 ImmortalWrt 更新只包含 3 个新增文件型内核补丁（不整树 merge）：
+
+- `be75fbfa9b`：flowtable 使用 VLAN ID 而非完整 TCI
+- `09fe0f8140`：bridge roaming flow 的 flowtable 检查
+- `c7924dcd74`：DSA host FDB 按端口跟踪
+
+**暂不取**：ImmortalWrt 2026-10-26 的整树 `Merge Official Source`、`firewall4` 升级/refresh
+（本地 firewall4 仍 pin 2025-03-17，会牵动 fullcone 与 bridge-flowtable 补丁），以及仅影响
+构建自测的 `kselftests-bpf`。等 `pbs05/ponwrt` 下一次官方 merge 后再跟整树更新。
 
 ---
 
@@ -38,8 +55,8 @@ README-HG5585F.md                     本文件
 
 | 文件 | 用途 |
 |---|---|
-| `*hg5585f-cu*sysupgrade.itb` | 联通现役机（4 口全内部 PHY，4×1G） |
-| `*hg5585f-ct*sysupgrade.itb` | 试刀机（lan1 是 MaxLinear GPY211C 2.5G） |
+| `*hg5585f-cu*sysupgrade.itb` | **CU 测试机**（4 口全内部 PHY，4×1G）；honk 首次验证只刷这个 |
+| `*hg5585f-ct*sysupgrade.itb` | **CT 主路由/生产机**（lan1 是 MaxLinear GPY211C 2.5G）；验证通过前不要刷 |
 | `*hg5585f-{cu,ct}*recovery.itb` | initramfs 救援镜像，U-Boot 可内存启动 |
 | `profiles.json` / `config.buildinfo` / `config.full` | 复现依据 |
 | `sha256sums.txt` | 校验和 |
@@ -54,7 +71,11 @@ README-HG5585F.md                     本文件
 
 ```sh
 gh workflow run build-hg5585f
-# 或打 tag 触发 + 自动发 Release
+# 默认 sync_upstream=true + update_honk=true；要可复现就显式关掉：
+# gh workflow run build-hg5585f -f sync_upstream=false -f update_honk=false
+# base 变体（无 dae/honk，PPE hw=1 A/B 用；只在 CU 上测）
+gh workflow run build-hg5585f -f proxy=none
+# 或打 tag 触发 + 自动发 Release（tag 构建不自动同步上游/honk）
 git tag v2026.10.17-2 && git push origin v2026.10.17-2
 ```
 
@@ -68,10 +89,12 @@ git tag v2026.10.17-2 && git push origin v2026.10.17-2
 ### 3.2 本地
 
 ```sh
-git clone --depth 1 https://github.com/Bernardxu123/ponwrt-hg5585f.git
-cd ponwrt-hg5585f
+git clone --depth 1 https://github.com/Bernardxu123/immortalwrt-hg5585f
+cd immortalwrt-hg5585f
 ./scripts/feeds update -a && ./scripts/feeds install -a
 sh scripts/hg5585f/gen-config.sh          # 内含 make defconfig + 断言
+# base 变体（无 dae/honk，PPE hw=1 A/B 用；只在 CU 上测）
+# PROXY=none sh scripts/hg5585f/gen-config.sh
 make -j$(( $(nproc) + 1 ))
 ```
 
@@ -91,8 +114,19 @@ git merge upstream/master     # 改动以新增文件为主
 git push origin master
 ```
 
-上游 merge 后不要自动重编：先看 `git log upstream/master` 有没有内核/驱动大改，再手动 dispatch。
-出正式固件只认 tag。
+手动 merge 上游后，先看 `git log upstream/master` 有没有内核/驱动大改，再手动 dispatch；
+自动同步见 §3.4。出正式固件只认 tag。
+
+### 3.4 构建时自动跟随上游/软件（2026-10-31 起）
+
+手动 `workflow_dispatch` 默认：
+
+- `sync_upstream=true`：构建前 `git fetch` 并 merge `pbs05/ponwrt` 最新 `master`；**冲突直接失败**，不会悄悄选一边；
+- `update_honk=true`：构建前从 `daeuniverse/honk` 拉**最新 release（含 beta）**的 aarch64 musl `stock-full` 资产，自动改写 `package/honk/Makefile` 的版本/URL/hash；API/资产异常时回退到仓库里 pinned 的版本，不阻塞构建；
+- feeds 本来每次 `feeds update -a`，跟默认分支最新；
+- **tag 构建跳过 `sync_upstream`/`update_honk`**，保证 release 可复现；手动构建的 Release notes 会记录 `上游同步` 和 `honk` 版本。
+
+想要完全可复现时，手动 dispatch 把这两个开关关掉，或把 feeds 钉到固定 commit；想要最新就保持默认。自动 merge 冲突的处理：本地 merge 解决后 commit/push，再重新 dispatch。
 
 ---
 
@@ -103,7 +137,7 @@ git push origin master
 | U-Boot（`firstblock.bin` + `bl31-u-boot.fip`） | 物料已有 | 原厂 boot 不认 `sysupgrade.itb` |
 | root（TTL 串口 115200 8N1，3.3V） | 未执行 | 拿不到 `mtd13 factory` 备份 |
 | **APONCAL 光模块校准（factory `0x0`，2 KB）** | **未取到** | **PON 完全起不来** |
-| **MT7916 WiFi EEPROM（factory `0x1000`，4 KB）** | **未取到** | WiFi 起不来（默认关，影响可控） |
+| **MT7916 WiFi EEPROM（factory `0x1000`，4 KB）** | **本机 `factory-1m.bin` 已验证**（offset 0x1000、4 KB、magic `16 79`；CT/CU 各自不同） | 刷入本机 factory；首启 `mt7916-an-eeprom-check` 只读校验；跨设备使用会校准错误 |
 | 1 MiB `factory` 镜像写回 | 依赖上一条 | MAC / SN 错，OLT 拒绝注册 |
 | LOID | 已知（不预置） | 不注册 |
 | PPPoE 账号 | 已知（不预置） | 拨不上号 |
@@ -159,7 +193,7 @@ HG5585F 侧：
 ```
 pon0                 PON 口
 pon0.995             802.1q VLAN 995 = 联通 INTERNET（WAN）
-wan                  proto=pppoe / device=pon0.995 / MTU·MRU 1492
+wan                  proto=pppoe / device=pon0.995 / UCI MTU·MRU 1500（pppd 协商 1492）
 wan6                 @wan / dhcpv6（联通 IPv6）
 br-lan               lan1 lan2 lan3 lan4（不含 pon0.995）
 lan                  192.168.31.1/24 + DHCP/RA
@@ -192,6 +226,42 @@ uci commit network && uci commit dhcp
 注意：桥接模式下看门狗需要拆 `lan` 才能卸载 `pon0.995`，会短暂断管理面；本版默认的
 `ifdown wan` 恢复逻辑是按主路由模式写的。
 
+### 6.1 启用 WiFi（可选）
+
+WiFi 默认 `disabled=1`。启用时直接跑：
+
+```sh
+wifi-enable
+```
+
+该脚本会设 `country=CN`、2.4G `ch11/HE20`、5G `ch149/HE80`（对齐 QWRT 的工作配置），
+不改 `txpower`。检查：
+
+```sh
+iw reg get
+iw dev
+```
+
+注意：
+- 5G 必须 `country=CN`，否则 ch149 可能被标成 NO-IR；
+- 不要抄 QWRT 的 `txpower=100` —— 那是 vendor 的百分比，mt76 的 UCI 用 dBm；
+- 本脚本不启用 802.11k/v/r；只有把 HG5585F 当第二个 OpenWrt AP 并跑 steering 守护进程时才需要。
+
+### 6.2 MT7916 EEPROM 校验（只读，不影响 U-Boot）
+
+`mt7916-an-eeprom-check` 首启只读检查 `factory` 卷偏移 0x1000 的 4 KiB 数据、magic `0x1679`，
+**不写 mtd/UBI，不碰 `fit`/`fip`/`ubootenv`**；U-Boot 启动读的是 `fit` 卷，sysupgrade 也只写
+`fit` 卷，所以这个检查不会影响刷机/启动。它只是把“EEPROM 缺失/无效”从静默 WiFi 失败变成
+`logread -e mt7916-eeprom` 里的一条明确日志。
+
+刷机前可在主机侧先验证本机备份：
+
+```sh
+python3 scripts/hg5585f/check-factory-eeprom.py 原厂备份-CT/factory-1m.bin
+```
+
+`factory-1m.bin` 每台设备唯一，不要用别人的。
+
 ---
 
 ## 7. 针对本机做的优化
@@ -200,7 +270,7 @@ uci commit network && uci commit dhcp
 |---|---|---|
 | 编译收敛 | 12 个 device profile → 2 个 | `PER_DEVICE_ROOTFS=y` 下每个 device 独立内核链接 + 独立 rootfs |
 | 二次构建加速 | `CONFIG_CCACHE=y` + CI 统一用 `$SRC/.ccache` | 改 overlay 后重编从 ~3h 降到 ~1h |
-| **flow offload** | `flow_offloading=1` + `flow_offloading_hw=1` | 路由模式下 **inet flowtable + AN7581 PPE** 可以卸载 PPPoE（驱动支持 `TC_SETUP_FT` / `FLOW_ACTION_PPPOE_PUSH`）。**桥接模式下这条不命中 PPPoE**，所以现在是它真正有意义的形态 |
+| **flow offload** | honk/dae：`flow_offloading=1` + `flow_offloading_hw=0`；未装 dae/honk（`PROXY=none/passwall/openclash`）：`1/1` | mainline `airoha_ppe` 支持 `FLOW_ACTION_PPPOE_PUSH`（1 VLAN + 1 PPPoE），路由模式可卸载 PPPoE；honk/dae 的 TC/eBPF 可能被硬件卸载旁路，故保守 `hw=0`；**QWRT 7.3 vendor 模块无 PPPoE 封装，其 `flow_offloading=0` 铁律不适用本固件** |
 | 不装 br_netfilter | `kmod-br-netfilter` 保持 not set | 桥接帧进 iptables 的元凶；与 `nf_conntrack_bridge` 是两回事 |
 | PON 参数预设 | `mode=epon-10g-1g`、`operator=ctc`、`ge_ports=4` | 原厂 `current_ponmode=EPON_10G`、`port_num=4` |
 | WiFi 默认关 | radio `disabled=1` | 小米 BE6500 Pro 继续做 AP；避免同一空间双 AP 干扰 |
@@ -212,7 +282,7 @@ uci commit network && uci commit dhcp
 
 - DTS 声明内存 **512 MiB**（`memory@80000000` 0x20000000）。实机若为 1 GiB，先 `free -m` 确认再考虑把重负载服务搬上来。
 - CU 的 LAN 是 **4×1G**；如果宽带 >1000M，CU 当主路由会卡在 1G。CT 的 `lan1` 是 2.5G，可换 CT 当主路由。
-- 当前内核 **没有 BTF**（`DEBUG_INFO_REDUCED=y`、无 `DEBUG_INFO_BTF`、`BPF_EVENTS` 关闭），所以 **daed 不能直接搬到 ONT**；本方案用 Passwall/OpenClash（tproxy/tun），不依赖 BTF。
+- 默认内核层（`configs/an7581.config`）是 `DEBUG_INFO_REDUCED=y`、无 `DEBUG_INFO_BTF`；但 `PROXY=dae` / `PROXY=honk` 层会显式覆盖成 `DEBUG_INFO_BTF=y`、关掉 `REDUCED`，并让 CI 断言 `pahole >= 1.16` 与产物 `.BTF` 段。所以 **Passwall/OpenClash 不需要 BTF；dae/honk 变体必须用 BTF 内核**。CT 现网 QWRT 是另一套闭源内核，仍然没有 BTF，不能套用本结论。
 
 ---
 
@@ -276,14 +346,14 @@ cat /tmp/pon-watchdog.log
 | EPON OAM profile | `ctc` | `uci set pon.line0_oam.operator='ieee'` |
 | 硬件 flow offload | `flow_offloading_hw=1` | 吞吐反而下降就 `uci set firewall.@defaults[0].flow_offloading_hw='0'` |
 | IPv6 | 开 | `uci set network.wan.ipv6='0'; uci delete network.wan6` + `uci set network.lan.ipv6='0'` |
-| WiFi | 关 | `uci set wireless.radio0.disabled='0'; uci set wireless.radio1.disabled='0'` + `wifi up` |
+| WiFi | 关 | `wifi-enable`（自动设 CN/ch11 HE20/ch149 HE80）；或手工 `uci set ...disabled='0'` + `wifi reload` |
 | zram | 开 | `uci set system.zram.enabled='0'` 或停用 `zram-swap` |
 | 看门狗灵敏度 | 40s / mpcp_delta≥3 | 改 `files/usr/sbin/pon-watchdog` 头部常量 |
 
 **待实测确认的假设**：
 
 1. 联通 995 是否真是 `pon0` 上的 802.1q tag → `tcpdump -i pon0 -e -n vlan`
-2. PPPoE 在 `pon0.995` 上能否拨通（MTU/MRU 1492）
+2. PPPoE 在 `pon0.995` 上能否拨通（UCI MTU/MRU 1500；pppd 协商 1492）
 3. `ifdown wan` + 删 `pon0.995` + 模块重载后，`ifup wan` 能否干净重建 VLAN
 4. `mpcp_timeouts` 在正常注册与故障自循环下的实际斜率
 5. `flow_offloading_hw` 在 AN7581 路由模式下是否真的带上 `flags offload`（`nft list flowtable inet fw4` / PPE debugfs）
@@ -298,23 +368,40 @@ uci set firewall.@defaults[0].flow_offloading='0'
 uci commit firewall && /etc/init.d/firewall restart
 ```
 
-### 分流内核：编译时三选一
+### 分流内核：编译时多选一（默认 honk）
 
-由 workflow 的 `proxy` 输入决定，默认 **passwall**（512 MiB RAM 首选）：
+由 workflow 的 `proxy` 输入决定，默认 **honk**（eBPF 新内核）。CU 测试机先刷
+`-cu` 镜像验证，CT 主路由验证通过前不要刷：
+
+> 注意：`proxy=honk` 只是把 honk **编进固件**；`honk.config.enabled` 默认是 `0`
+> （出场不启用），首次使用需按下方命令手动启用。未启用 honk 时它不接管流量，
+> 但 `99-hg5585f-setup` 仍按"honk 二进制存在"把 `flow_offloading_hw` 设为 `0`
+> （保守值，避免启用后与 eBPF 冲突）。
 
 ```sh
-gh workflow run build-hg5585f --repo Bernardxu123/ponwrt-hg5585f --ref master \
-  -f proxy=passwall -f build_recovery=true
+gh workflow run build-hg5585f --repo Bernardxu123/immortalwrt-hg5585f --ref master \
+  -f proxy=honk -f build_recovery=true
 ```
 
 | proxy | 配置文件 | 取舍 |
 |---|---|---|
-| `passwall`（默认） | `configs/hg5585f-proxy-passwall.config` | Xray/SingBox/Hysteria/Simple-Obfs/Geoview；不拉 Rust，约 +30~40 分钟 |
+| `honk`（默认） | `configs/hg5585f-proxy-honk.config` | 官方 v0.1.0-beta.3 aarch64 musl stock-full 预编译包；BTF + TCX/eBPF + NFQUEUE；内嵌 doona 面板；仍是 alpha，别直接上主路由 |
+| `dae` | `configs/hg5585f-proxy-dae.config` | 旧 eBPF 单内核；同样要 BTF；保留作为 A/B 回退 |
+| `passwall` | `configs/hg5585f-proxy-passwall.config` | Xray/SingBox/Hysteria/Simple-Obfs/Geoview；不拉 Rust，约 +30~40 分钟 |
 | `openclash` | `configs/hg5585f-proxy-openclash.config` | Clash 订阅原生；DEPENDS 里有 `+ruby +ruby-yaml`，Ruby 源码编译约 +15~25 分钟，运行内存也更高 |
 | `none` | 无 | 只做路由/桥接，验证链路用 |
 
-两者互斥，断言会检查。**不开 Shadowsocks-Rust**：会把 Rust 工具链拉进构建
+这些分流层互斥，断言会检查；`dae` 与 `honk` 还会在运行时争用 `dae0`/`daens`，
+不要同时启用。**不开 Shadowsocks-Rust**：会把 Rust 工具链拉进构建
 （`rust/host` 现编，ccache 覆盖不到），而实际节点是 VLESS/Reality/Hy2，用不上。
+
+honk 包的文件位置：
+
+- `package/honk/`：预编译 `honk-core`、procd init、UCI、`/etc/honk/config.dae`
+- `package/vmlinux-btf-builtin/`：满足 `+vmlinux-btf` 虚依赖（内核自带 BTF）
+- `package/luci-app-honk/` + `package/luci-lib-daeuniverse/`：LuCI 状态/配置编辑页
+- 面板：`http://<LAN-IP>:9090/ui/`（首次打开创建管理员；只放 LAN）
+- 启用：`uci set honk.config.enabled='1'; uci commit honk; /etc/init.d/honk enable; /etc/init.d/honk start`
 
 nikki（mihomo）不在选项里——它需要额外 feed（`nikkinikki-org/OpenWrt-nikki`），
 本仓库没加。想要更轻的 Clash 方案可以自己加 feed 后照 `openclash` 的写法加一个层。
@@ -322,16 +409,18 @@ nikki（mihomo）不在选项里——它需要额外 feed（`nikkinikki-org/Ope
 ### 方案对比（参考 qwpianzhang/Actions-OpenWrt-HG5585F）
 
 **Passwall 与 OpenClash 都在 ImmortalWrt feeds 里**，不需要额外 feed；
-只有 **nikki（mihomo）** 要加 feed。
+**honk 用本仓库 `package/honk` 的官方预编译包**；只有 **nikki（mihomo）** 要加 feed。
 
 | 方案 | 来源 | 取舍 |
 |---|---|---|
+| honk | 本仓库 `package/honk`（官方 release） | eBPF 单内核 + doona 面板；BTF 前提；alpha，适合 CU 测试 |
+| dae | 本仓库 `package/dae` | 旧 eBPF；规则语法与 honk 接近；保留作 A/B |
 | Passwall | ImmortalWrt feeds 自带 | Xray/SingBox/Hysteria；比 OpenClash 轻；Clash 订阅需转换 |
 | OpenClash | ImmortalWrt feeds 自带 | Clash 订阅/规则原生；参考仓注明 **Ruby/Rust 编译极慢** |
 | nikki | 额外 feed `nikkinikki-org/OpenWrt-nikki` | mihomo 内核 + LuCI；Clash 订阅原生，比 OpenClash 轻 |
 
-本版先不内置；确认基础固件能拨号、PON 注册、PPE 卸载、看门狗恢复后，再按选择
-把对应 `CONFIG_PACKAGE_*` 打开。`configs/hg5585f-build.config` 末尾有备查块。
+确认基础固件能拨号、PON 注册、PPE 卸载、看门狗恢复后，再用 `proxy=honk` 编 CU
+镜像验证；CT 主路由（QWRT）保持不动。`configs/hg5585f-build.config` 末尾有备查块。
 
 ---
 
